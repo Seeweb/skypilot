@@ -2511,7 +2511,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def _update_cluster_info(self):
         # When a cluster is on a cloud that does not support the new
         # provisioner, we should skip updating cluster_info.
-        if (self.launched_resources.cloud.PROVISIONER_VERSION >=
+        if (self.launched_resources.cloud is not None and
+                self.launched_resources.cloud.PROVISIONER_VERSION >=
                 clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
             config = {}
@@ -3657,8 +3658,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 try:
                     retry_provisioner = RetryingVmProvisioner(
                         self.log_dir,
-                        self._dag,
-                        self._optimize_target,
+                        self._dag,  # type: ignore[arg-type]
+                        self._optimize_target,  # type: ignore[arg-type]
                         self._requested_features,
                         local_wheel_path,
                         wheel_hash,
@@ -4153,7 +4154,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         runners = handle.get_command_runners(avoid_ssh_control=True)
 
         def _setup_node(node_id: int) -> None:
-            setup_envs = task.envs_and_secrets
+            setup_envs = task_lib.get_plaintext_envs_and_secrets(
+                task.envs_and_secrets)
             setup_envs.update(self._skypilot_predefined_env_vars(handle))
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
@@ -4630,7 +4632,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         is_identity_mismatch_and_purge = False
         try:
             backend_utils.check_owner_identity(cluster_name)
-        except exceptions.ClusterOwnerIdentityMismatchError as e:
+        except (exceptions.ClusterOwnerIdentityMismatchError,
+                exceptions.CloudUserIdentityError) as e:
             if purge:
                 logger.error(e)
                 verbed = 'terminated' if terminate else 'stopped'
@@ -4829,9 +4832,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             (dir if constants.SKY_LOGS_DIRECTORY in dir else os.path.join(
                 constants.SKY_LOGS_DIRECTORY, dir)) for dir in dirs
         ]
-        local_log_dirs = [(dir.replace(constants.SKY_LOGS_DIRECTORY, local_dir)
-                           if constants.SKY_LOGS_DIRECTORY in dir else
-                           os.path.join(local_dir, dir)) for dir in dirs]
+        # Include cluster name in local log directory path to avoid conflicts
+        # when the same job_id exists on different clusters
+        cluster_name = handle.cluster_name
+        local_log_dirs = []
+        for remote_log_dir in dirs:
+            if constants.SKY_LOGS_DIRECTORY in remote_log_dir:
+                # Extract the job-specific directory name from the full path
+                # e.g., ~/sky_logs/1-job_name -> 1-job_name
+                job_dir = remote_log_dir.replace(constants.SKY_LOGS_DIRECTORY,
+                                                 '').lstrip('/')
+                local_log_dir = os.path.join(local_dir, cluster_name, job_dir)
+            else:
+                # remote_log_dir is already just the job directory name (e.g.,
+                # "1-job_name")
+                local_log_dir = os.path.join(local_dir, cluster_name,
+                                             remote_log_dir)
+            local_log_dirs.append(local_log_dir)
 
         runners = handle.get_command_runners()
 
@@ -6356,7 +6373,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _get_task_env_vars(self, task: task_lib.Task, job_id: int,
                            handle: CloudVmRayResourceHandle) -> Dict[str, str]:
         """Returns the environment variables for the task."""
-        env_vars = task.envs_and_secrets
+        env_vars = task_lib.get_plaintext_envs_and_secrets(
+            task.envs_and_secrets)
         # If it is a managed job, the TASK_ID_ENV_VAR will have been already set
         # by the controller.
         if constants.TASK_ID_ENV_VAR not in env_vars:

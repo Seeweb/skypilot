@@ -4799,8 +4799,6 @@ class CoreWeaveStore(S3CompatibleStore):
 class SeewebStore(S3CompatibleStore):
     """S3-compatible backend for Seeweb Cloud Object Storage."""
 
-    _DEFAULT_REGION = 'eu-milano-1'
-
     @classmethod
     def get_config(cls) -> S3CompatibleConfig:
         return S3CompatibleConfig(
@@ -4814,7 +4812,6 @@ class SeewebStore(S3CompatibleStore):
             aws_profile=seeweb_adaptor.SEEWEB_PROFILE_NAME,
             get_endpoint_url=seeweb_adaptor.get_endpoint,
             cloud_name=str(clouds.Seeweb()),
-            default_region=cls._DEFAULT_REGION,
             mount_cmd_factory=cls._get_seeweb_mount_cmd,
         )
 

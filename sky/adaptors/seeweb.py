@@ -46,7 +46,6 @@ _LAZY_MODULES = (ecsapi, boto3, botocore)
 SEEWEB_PROFILE_NAME = 'seeweb'
 SEEWEB_CREDENTIALS_PATH = '~/.aws/credentials'
 SEEWEB_CONFIG_PATH = '~/.aws/config'
-_DEFAULT_ENDPOINT = 'https://cos3005.s3seeweb.it'
 _ENDPOINT_ENV_VAR = 'SEEWEB_S3_ENDPOINT'
 _INDENT_PREFIX = '    '
 
@@ -127,7 +126,15 @@ def get_endpoint() -> str:
     if env_fallback:
         endpoint = env_fallback.strip()
         return endpoint
-    return _DEFAULT_ENDPOINT
+
+    # No endpoint configured - raise an error
+    with ux_utils.print_exception_no_traceback():
+        raise SeewebCredentialsFileNotFound(
+            'Seeweb S3 endpoint not configured. Set the endpoint via:\n'
+            f'{_INDENT_PREFIX}aws configure set endpoint_url '
+            f'<SEEWEB_ENDPOINT> --profile {SEEWEB_PROFILE_NAME}\n'
+            f'{_INDENT_PREFIX}OR set environment variable '
+            f'{_ENDPOINT_ENV_VAR}=<SEEWEB_ENDPOINT>')
 
 
 def get_seeweb_credentials(boto3_session):

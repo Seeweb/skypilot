@@ -48,6 +48,7 @@ from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision import metadata_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.slurm import utils as slurm_utils
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
 from sky.server import common
@@ -56,6 +57,7 @@ from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
 from sky.server import middleware_utils
+from sky.server import server_utils
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
@@ -470,7 +472,8 @@ async def schedule_on_boot_check_async():
         await executor.schedule_request_async(
             request_id='skypilot-server-on-boot-check',
             request_name=request_names.RequestName.CHECK,
-            request_body=payloads.CheckBody(),
+            request_body=server_utils.build_body_at_server(
+                request=None, body_type=payloads.CheckBody),
             func=sky_check.check,
             schedule_type=requests_lib.ScheduleType.SHORT,
             is_skypilot_system=True,
@@ -493,7 +496,8 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             await executor.schedule_request_async(
                 request_id=event.id,
                 request_name=event.name,
-                request_body=payloads.RequestBody(),
+                request_body=server_utils.build_body_at_server(
+                    request=None, body_type=payloads.RequestBody),
                 func=event.run_event,
                 schedule_type=requests_lib.ScheduleType.SHORT,
                 is_skypilot_system=True,
@@ -618,6 +622,9 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
 app.add_middleware(APIVersionMiddleware)
+# The order of all the authentication-related middleware is important.
+# RBACMiddleware must precede all the auth middleware, so it can access
+# request.state.auth_user.
 app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
@@ -632,10 +639,6 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*'],
     expose_headers=['X-Skypilot-Request-ID'])
-# The order of all the authentication-related middleware is important.
-# RBACMiddleware must precede all the auth middleware, so it can access
-# request.state.auth_user.
-app.add_middleware(RBACMiddleware)
 # Authentication based on oauth2-proxy.
 app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # AuthProxyMiddleware should precede BasicAuthMiddleware and
@@ -747,8 +750,11 @@ async def enabled_clouds(request: fastapi.Request,
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS,
-        request_body=payloads.EnabledCloudsBody(workspace=workspace,
-                                                expand=expand),
+        request_body=server_utils.build_body_at_server(
+            request=request,
+            body_type=payloads.EnabledCloudsBody,
+            workspace=workspace,
+            expand=expand),
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -785,6 +791,35 @@ async def kubernetes_node_info(
     )
 
 
+@app.post('/slurm_gpu_availability')
+async def slurm_gpu_availability(
+    request: fastapi.Request,
+    slurm_gpu_availability_body: payloads.SlurmGpuAvailabilityRequestBody
+) -> None:
+    """Gets real-time Slurm GPU availability."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.REALTIME_SLURM_GPU_AVAILABILITY,
+        request_body=slurm_gpu_availability_body,
+        func=core.realtime_slurm_gpu_availability,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
+@app.get('/slurm_node_info')
+async def slurm_node_info(
+        request: fastapi.Request,
+        slurm_node_info_body: payloads.SlurmNodeInfoRequestBody) -> None:
+    """Gets detailed information for each node in the Slurm cluster."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.SLURM_NODE_INFO,
+        request_body=slurm_node_info_body,
+        func=slurm_utils.slurm_node_info,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
 @app.get('/status_kubernetes')
 async def status_kubernetes(request: fastapi.Request) -> None:
     """[Experimental] Get all SkyPilot resources (including from other '
@@ -792,7 +827,8 @@ async def status_kubernetes(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STATUS_KUBERNETES,
-        request_body=payloads.RequestBody(),
+        request_body=server_utils.build_body_at_server(
+            request=request, body_type=payloads.RequestBody),
         func=core.status_kubernetes,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -1461,7 +1497,8 @@ async def storage_ls(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STORAGE_LS,
-        request_body=payloads.RequestBody(),
+        request_body=server_utils.build_body_at_server(
+            request=request, body_type=payloads.RequestBody),
         func=core.storage_ls,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -2008,7 +2045,8 @@ async def all_contexts(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ALL_CONTEXTS,
-        request_body=payloads.RequestBody(),
+        request_body=server_utils.build_body_at_server(
+            request=request, body_type=payloads.RequestBody),
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )

@@ -178,6 +178,11 @@ apiService:
   # @schema type: [string, null]
   imagePullPolicy: Always
 
+  # Add scheduling constraints to the API server pod
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
 # Authentication configuration for the API server
 # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
 # @schema type: [object, null]
@@ -506,6 +511,11 @@ r2Credentials:
   enabled: false
   # Name of the secret containing the r2 credentials. Only used if enabled is true.
   r2SecretName: r2-credentials
+
+coreweaveCredentials:
+  enabled: false
+  # Name of the secret containing the coreweave credentials. Only used if enabled is true.
+  coreweaveSecretName: coreweave-credentials
 
 # Extra init containers to run before the api container
 # @schema type: [array, null]; item: object
